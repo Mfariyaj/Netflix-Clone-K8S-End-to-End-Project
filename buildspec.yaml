@@ -1,0 +1,44 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "🔹 Cleaning up workspace..."
+      - npm install
+
+      - echo "🔹 Running OWASP Dependency Check..."
+      - dependency-check.sh --scan ./ --format XML --out dependency-check-report.xml
+
+      - echo "🔹 Running Trivy filesystem scan..."
+      - trivy fs . > trivyfs.txt
+
+  build:
+    commands:
+      - echo "🔹 Logging into Amazon ECR..."
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+
+      - echo "🔹 Building Docker image..."
+      - docker build -t netflix .
+
+      - echo "🔹 Tagging Docker image..."
+      - docker tag netflix <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/netflix:latest
+
+      - echo "🔹 Pushing Docker image to ECR..."
+      - docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/netflix:latest
+
+  post_build:
+    commands:
+      - echo "🔹 Running Trivy image scan..."
+      - trivy image <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/netflix:latest > trivyimage.txt
+
+      - echo "🔹 Deploying to Kubernetes..."
+      - aws eks update-kubeconfig --name netflix-cluster --region us-east-1
+      - kubectl apply -f Kubernetes/deployment.yml
+      - kubectl apply -f Kubernetes/service.yml
+      - kubectl get svc
+      - kubectl get all
+
+artifacts:
+  files:
+    - '**/*'
+  name: Netflix-Build-${CODEBUILD_BUILD_NUMBER}
